@@ -16,7 +16,6 @@ import (
 
 	"github.com/Machiel/slugify"
 	"github.com/PuerkitoBio/goquery"
-	"github.com/logrusorgru/aurora"
 )
 
 const (
@@ -94,7 +93,6 @@ func main() {
 
 	for i := 1; i <= pages; i++ {
 		url := fmt.Sprintf("%s%s&pag=%d", resultsURL, url.QueryEscape(*query), i)
-		fmt.Println(aurora.Red(url))
 
 		doc, err := goquery.NewDocument(url)
 		if err != nil {
@@ -103,7 +101,9 @@ func main() {
 
 		doc.Find(".dc_id").Each(func(i int, s *goquery.Selection) {
 			oai := s.Text()
-			fmt.Println(aurora.Green(oai))
+			slug := slugify.Slugify(oai)
+
+			fmt.Printf("%s\t%s.xml\n", oai, slug)
 			wg.Add(1)
 			go downloadXML(oai, &wg)
 		})
