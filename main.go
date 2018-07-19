@@ -19,8 +19,8 @@ import (
 )
 
 const (
-	resultsURL      = "http://www.internetculturale.it/opencms/opencms/it/ricerca_metamag.jsp?semplice.y=0&semplice.x=0&instance=mag&q="
-	downloadURL     = "http://www.internetculturale.it/opencms/opencms/it/MagExport?id="
+	resultsURL      = "http://www.internetculturale.it/it/16/search?instance=magindice&q="
+	downloadURL     = "http://www.internetculturale.it/metaindiceServices/MagExport?id="
 	outputDirectory = "./ic-data"
 )
 
