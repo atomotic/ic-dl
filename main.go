@@ -12,6 +12,7 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/Machiel/slugify"
@@ -19,18 +20,18 @@ import (
 )
 
 const (
-	resultsURL      = "http://www.internetculturale.it/it/16/search?instance=magindice&q="
+	resultsURL      = "http://www.internetculturale.it/it/16/search?instance=magindice"
 	downloadURL     = "http://www.internetculturale.it/metaindiceServices/MagExport?id="
 	outputDirectory = "./ic-data"
 )
 
 var (
-	query = flag.String("query", "", "string to search in Internet Culturale")
+	query      = flag.String("query", "", "query string")
+	queryAll   = flag.Bool("all", false, "search all (*)")
+	filterType = flag.String("type", "", "filtery by type (eg. 'periodico')")
 )
 
-func getPages(query string) (int, error) {
-	url := fmt.Sprintf("%s%s", resultsURL, url.QueryEscape(query))
-
+func getPages(url string) (int, error) {
 	resp, err := http.Get(url)
 	if err != nil {
 		log.Fatal("error")
@@ -38,11 +39,14 @@ func getPages(query string) (int, error) {
 	defer resp.Body.Close()
 	body, err := ioutil.ReadAll(resp.Body)
 
-	regexp, _ := regexp.Compile(`Pagina (\d+) di (\d+)`)
+	// match the pagination, examples string `Pagina 1 di 14.671 (293.410 risultati trovati)`
+	regexp, _ := regexp.Compile(`Pagina (\d+) di (\d+\.?\d*)`)
+
 	results := regexp.FindStringSubmatch(string(body))
 
 	if len(results) > 0 {
-		pages, _ := strconv.Atoi(results[2])
+		// remove the dot decimal separator from number of pages, and convert to int
+		pages, _ := strconv.Atoi(strings.Replace(results[2], ".", "", -1))
 		return pages, nil
 	} else {
 		return 0, errors.New("no results")
@@ -58,13 +62,13 @@ func downloadXML(oai string, wg *sync.WaitGroup) {
 	filename := fmt.Sprintf("%s/%s.xml", outputDirectory, slug)
 	output, err := os.Create(filename)
 	if err != nil {
-		log.Fatal("error creating")
+		log.Fatal("file creation error")
 	}
 	defer output.Close()
 
 	response, err := http.Get(url)
 	if err != nil {
-		log.Fatal("error get")
+		log.Fatal("xml download error")
 	}
 	defer response.Body.Close()
 
@@ -73,9 +77,11 @@ func downloadXML(oai string, wg *sync.WaitGroup) {
 
 func main() {
 	var wg sync.WaitGroup
+	var startURL string
+	var q string
 
 	flag.Parse()
-	if *query == "" {
+	if *queryAll == false && *query == "" {
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
@@ -84,15 +90,27 @@ func main() {
 		os.Mkdir(outputDirectory, 0755)
 	}
 
-	pages, err := getPages(*query)
+	if *queryAll == true {
+		q = "*"
+	} else {
+		q = url.QueryEscape(*query)
+	}
+
+	if *filterType != "" {
+		startURL = fmt.Sprintf("%s&q=%s&__meta_typeLivello=%s", resultsURL, q, *filterType)
+	} else {
+		startURL = fmt.Sprintf("%s&q=%s", resultsURL, q)
+	}
+
+	pages, err := getPages(startURL)
 
 	if err != nil {
-		fmt.Println("no result")
+		fmt.Println("0 results")
 		os.Exit(1)
 	}
 
 	for i := 1; i <= pages; i++ {
-		url := fmt.Sprintf("%s%s&pag=%d", resultsURL, url.QueryEscape(*query), i)
+		url := fmt.Sprintf("%s&pag=%d", startURL, i)
 
 		doc, err := goquery.NewDocument(url)
 		if err != nil {
@@ -102,7 +120,6 @@ func main() {
 		doc.Find(".dc_id").Each(func(i int, s *goquery.Selection) {
 			oai := s.Text()
 			slug := slugify.Slugify(oai)
-
 			fmt.Printf("%s\t%s.xml\n", oai, slug)
 			wg.Add(1)
 			go downloadXML(oai, &wg)
