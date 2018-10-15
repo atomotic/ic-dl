@@ -1,7 +1,6 @@
 # ic-magxml-download
 
-script minimale per scaricare i file MAG XML degli oggetti risultato di una ricerca nella **Biblioteca Digitale** di http://www.internetculturale.it
-
+scarica i file MAG XML degli oggetti risultato di una ricerca nella **Biblioteca Digitale** di http://www.internetculturale.it
 
 ## Installazione
 
@@ -10,8 +9,12 @@ script minimale per scaricare i file MAG XML degli oggetti risultato di una rice
 ## Utilizzo
 
     ~ ic-magxml-download
-    -query string
-    	string to search in Internet Culturale
+        -all
+                search all (*)
+        -query string
+                query string
+        -type string
+                filtery by type (eg. 'periodici')
 
 ### Esempio
 
