@@ -26,9 +26,10 @@ const (
 )
 
 var (
-	query      = flag.String("query", "", "query string")
-	queryAll   = flag.Bool("all", false, "search all (*)")
-	filterType = flag.String("type", "", "filtery by type (eg. 'periodico')")
+	query        = flag.String("query", "", "query string")
+	queryAll     = flag.Bool("all", false, "search all (*)")
+	biblioType   = flag.String("biblio-type", "", "filtery by bibliographic type (eg. 'periodico')")
+	documentType = flag.String("document-type", "", "filtery by document type (eg. 'manoscritto')")
 )
 
 func getPages(url string) (int, error) {
@@ -96,12 +97,17 @@ func main() {
 		q = url.QueryEscape(*query)
 	}
 
-	if *filterType != "" {
-		startURL = fmt.Sprintf("%s&q=%s&__meta_typeLivello=%s", resultsURL, q, *filterType)
-	} else {
-		startURL = fmt.Sprintf("%s&q=%s", resultsURL, q)
+	startURL = fmt.Sprintf("%s&q=%s", resultsURL, q)
+
+	if *biblioType != "" {
+		startURL = startURL + "&__meta_typeLivello=" + *biblioType
 	}
 
+	if *documentType != "" {
+		startURL = startURL + "&channel__typeTipo=" + url.QueryEscape(*documentType)
+	}
+
+	fmt.Println(startURL)
 	pages, err := getPages(startURL)
 
 	if err != nil {
