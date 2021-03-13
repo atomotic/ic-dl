@@ -2,6 +2,8 @@
 
 scarica i file MAG XML degli oggetti risultato di una ricerca nella **Biblioteca Digitale** di http://www.internetculturale.it
 
+[![asciicast](https://asciinema.org/a/398757.svg)](https://asciinema.org/a/398757)
+
 ## Installazione
 
     ~ go get -u -v github.com/atomotic/ic-dl
