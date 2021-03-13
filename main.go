@@ -33,12 +33,15 @@ var (
 )
 
 func getPages(url string) (int, error) {
-	resp, err := http.Get(url)
+	res, err := http.Get(url)
 	if err != nil {
 		log.Fatal("error")
 	}
-	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
+	defer res.Body.Close()
+	body, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return 0, err
+	}
 
 	// match the pagination, examples string `Pagina 1 di 14.671 (293.410 risultati trovati)`
 	regexp, _ := regexp.Compile(`Pagina (\d+) di (\d+\.?\d*)`)
@@ -67,13 +70,13 @@ func downloadXML(oai string, wg *sync.WaitGroup) {
 	}
 	defer output.Close()
 
-	response, err := http.Get(url)
+	res, err := http.Get(url)
 	if err != nil {
 		log.Fatal("xml download error")
 	}
-	defer response.Body.Close()
+	defer res.Body.Close()
 
-	io.Copy(output, response.Body)
+	io.Copy(output, res.Body)
 }
 
 func main() {
@@ -82,7 +85,7 @@ func main() {
 	var q string
 
 	flag.Parse()
-	if *queryAll == false && *query == "" {
+	if !*queryAll && *query == "" {
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
@@ -91,7 +94,7 @@ func main() {
 		os.Mkdir(outputDirectory, 0755)
 	}
 
-	if *queryAll == true {
+	if *queryAll {
 		q = "*"
 	} else {
 		q = url.QueryEscape(*query)
@@ -118,9 +121,15 @@ func main() {
 	for i := 1; i <= pages; i++ {
 		url := fmt.Sprintf("%s&pag=%d", startURL, i)
 
-		doc, err := goquery.NewDocument(url)
+		res, err := http.Get(url)
 		if err != nil {
-			log.Fatal(err)
+			log.Println(err)
+		}
+		defer res.Body.Close()
+
+		doc, err := goquery.NewDocumentFromReader(res.Body)
+		if err != nil {
+			log.Println(err)
 		}
 
 		doc.Find(".dc_id").Each(func(i int, s *goquery.Selection) {
