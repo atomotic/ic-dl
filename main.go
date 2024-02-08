@@ -1,97 +1,91 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"flag"
 	"fmt"
-	"io"
-	"io/ioutil"
 	"log"
-	"net/http"
+	"log/slog"
 	"net/url"
 	"os"
 	"regexp"
 	"strconv"
-	"strings"
 	"sync"
 
 	"github.com/Machiel/slugify"
 	"github.com/PuerkitoBio/goquery"
+	"github.com/carlmjohnson/requests"
 )
 
 const (
-	resultsURL      = "http://www.internetculturale.it/it/16/search?instance=magindice"
-	downloadURL     = "http://www.internetculturale.it/metaindiceServices/MagExport?id="
-	outputDirectory = "./ic-data"
+	resultsURL  = "http://www.internetculturale.it/it/16/search?instance=magindice"
+	downloadURL = "http://www.internetculturale.it/metaindiceServices/MagExport?id="
+	output      = "./data"
 )
 
-var (
-	query        = flag.String("query", "", "query string")
-	queryAll     = flag.Bool("all", false, "search all (*)")
-	biblioType   = flag.String("biblio-type", "", "filtery by bibliographic type (eg. 'periodico')")
-	documentType = flag.String("document-type", "", "filtery by document type (eg. 'manoscritto')")
-)
-
-func getPages(url string) (int, error) {
-	res, err := http.Get(url)
-	if err != nil {
-		log.Fatal("error")
-	}
-	defer res.Body.Close()
-	body, err := ioutil.ReadAll(res.Body)
+func pages(url string) (float64, error) {
+	var body string
+	err := requests.URL(url).ToString(&body).Fetch(context.Background())
 	if err != nil {
 		return 0, err
 	}
 
-	// match the pagination, examples string `Pagina 1 di 14.671 (293.410 risultati trovati)`
-	regexp, _ := regexp.Compile(`Pagina (\d+) di (\d+\.?\d*)`)
+	// pagination match, example string: `Pagina 1 di 14.671 (293.410 risultati trovati)`
+	regexp, _ := regexp.Compile(`Pagina (\d+) di (\d+) \((\d+(\.\d+)?) risultati trovati\)`)
+	matches := regexp.FindStringSubmatch(body)
+	if len(matches) >= 3 {
+		total, err := strconv.ParseFloat(matches[3], 64)
+		if err != nil {
+			return 0, err
+		}
+		if total == 0 {
+			return 0, errors.New("0 results")
+		}
 
-	results := regexp.FindStringSubmatch(string(body))
-
-	if len(results) > 0 {
-		// remove the dot decimal separator from number of pages, and convert to int
-		pages, _ := strconv.Atoi(strings.Replace(results[2], ".", "", -1))
+		pages, err := strconv.ParseFloat(matches[2], 64)
+		if err != nil {
+			return 0, err
+		}
 		return pages, nil
 	} else {
-		return 0, errors.New("no results")
+		return 0, errors.New("0 results")
 	}
 }
 
-func downloadXML(oai string, wg *sync.WaitGroup) {
+func download(oai string, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	url := fmt.Sprintf("%s%s", downloadURL, oai)
 	slug := slugify.Slugify(oai)
+	filename := fmt.Sprintf("%s/%s.xml", output, slug)
 
-	filename := fmt.Sprintf("%s/%s.xml", outputDirectory, slug)
-	output, err := os.Create(filename)
+	err := requests.URL(url).ToFile(filename).Fetch(context.Background())
+
 	if err != nil {
-		log.Fatal("file creation error")
+		log.Fatal(err)
 	}
-	defer output.Close()
-
-	res, err := http.Get(url)
-	if err != nil {
-		log.Fatal("xml download error")
-	}
-	defer res.Body.Close()
-
-	io.Copy(output, res.Body)
 }
 
 func main() {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	var wg sync.WaitGroup
-	var startURL string
 	var q string
+
+	query := flag.String("query", "", "query string")
+	queryAll := flag.Bool("all", false, "search all (*)")
+	biblioType := flag.String("biblio-type", "", "filtery by bibliographic type (eg. 'periodico')")
+	documentType := flag.String("document-type", "", "filtery by document type (eg. 'manoscritto')")
 
 	flag.Parse()
 	if !*queryAll && *query == "" {
-		flag.PrintDefaults()
+		flag.Usage()
 		os.Exit(1)
 	}
 
-	if _, err := os.Stat(outputDirectory); os.IsNotExist(err) {
-		os.Mkdir(outputDirectory, 0755)
+	if _, err := os.Stat(output); os.IsNotExist(err) {
+		os.Mkdir(output, 0755)
 	}
 
 	if *queryAll {
@@ -100,44 +94,44 @@ func main() {
 		q = url.QueryEscape(*query)
 	}
 
-	startURL = fmt.Sprintf("%s&q=%s", resultsURL, q)
+	seed := fmt.Sprintf("%s&q=%s", resultsURL, q)
 
 	if *biblioType != "" {
-		startURL = startURL + "&__meta_typeLivello=" + *biblioType
+		seed = seed + "&__meta_typeLivello=" + *biblioType
 	}
 
 	if *documentType != "" {
-		startURL = startURL + "&channel__typeTipo=" + url.QueryEscape(*documentType)
+		seed = seed + "&channel__typeTipo=" + url.QueryEscape(*documentType)
 	}
 
-	fmt.Println(startURL)
-	pages, err := getPages(startURL)
+	logger.Info(seed)
+	pages, err := pages(seed)
 
 	if err != nil {
-		fmt.Println("0 results")
-		os.Exit(1)
+		logger.Warn("0 results")
+		os.Exit(0)
 	}
 
-	for i := 1; i <= pages; i++ {
-		url := fmt.Sprintf("%s&pag=%d", startURL, i)
+	for i := 1; i <= int(pages); i++ {
+		url := fmt.Sprintf("%s&pag=%d", seed, i)
 
-		res, err := http.Get(url)
+		var buf bytes.Buffer
+		err = requests.URL(url).ToBytesBuffer(&buf).Fetch(context.Background())
 		if err != nil {
-			log.Println(err)
+			logger.Error(err.Error())
 		}
-		defer res.Body.Close()
 
-		doc, err := goquery.NewDocumentFromReader(res.Body)
+		doc, err := goquery.NewDocumentFromReader(&buf)
 		if err != nil {
-			log.Println(err)
+			logger.Error(err.Error())
 		}
 
 		doc.Find(".dc_id").Each(func(i int, s *goquery.Selection) {
 			oai := s.Text()
 			slug := slugify.Slugify(oai)
-			fmt.Printf("%s\t%s.xml\n", oai, slug)
+			logger.Info("download", "identifier", oai, "file", slug)
 			wg.Add(1)
-			go downloadXML(oai, &wg)
+			go download(oai, &wg)
 		})
 
 	}
