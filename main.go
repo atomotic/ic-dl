@@ -6,17 +6,16 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log"
 	"log/slog"
 	"net/url"
 	"os"
 	"regexp"
 	"strconv"
-	"sync"
 
 	"github.com/Machiel/slugify"
 	"github.com/PuerkitoBio/goquery"
 	"github.com/carlmjohnson/requests"
+	"github.com/sourcegraph/conc"
 )
 
 const (
@@ -25,7 +24,7 @@ const (
 	output      = "./data"
 )
 
-func pages(url string) (float64, error) {
+func pages(url string) (int, error) {
 	var body string
 	err := requests.URL(url).ToString(&body).Fetch(context.Background())
 	if err != nil {
@@ -48,29 +47,27 @@ func pages(url string) (float64, error) {
 		if err != nil {
 			return 0, err
 		}
-		return pages, nil
+		return int(pages), nil
 	} else {
 		return 0, errors.New("0 results")
 	}
 }
 
-func download(oai string, wg *sync.WaitGroup) {
-	defer wg.Done()
-
+func download(oai string) error {
 	url := fmt.Sprintf("%s%s", downloadURL, oai)
 	slug := slugify.Slugify(oai)
 	filename := fmt.Sprintf("%s/%s.xml", output, slug)
 
 	err := requests.URL(url).ToFile(filename).Fetch(context.Background())
-
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
+	return nil
 }
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	var wg sync.WaitGroup
+	var wg conc.WaitGroup
 	var q string
 
 	query := flag.String("query", "", "query string")
@@ -112,7 +109,7 @@ func main() {
 		os.Exit(0)
 	}
 
-	for i := 1; i <= int(pages); i++ {
+	for i := 1; i <= pages; i++ {
 		url := fmt.Sprintf("%s&pag=%d", seed, i)
 
 		var buf bytes.Buffer
@@ -129,9 +126,14 @@ func main() {
 		doc.Find(".dc_id").Each(func(i int, s *goquery.Selection) {
 			oai := s.Text()
 			slug := slugify.Slugify(oai)
-			logger.Info("download", "identifier", oai, "file", slug)
-			wg.Add(1)
-			go download(oai, &wg)
+			wg.Go(func() {
+				err = download(oai)
+				if err != nil {
+					logger.Error(err.Error(), "identifier", oai)
+				} else {
+					logger.Info("download", "identifier", oai, "file", slug)
+				}
+			})
 		})
 
 	}
